@@ -4,10 +4,11 @@
 #include <FS.h>
 #include <SD.h>
 
-// #include <stdlib.h>
-#include <bits/stdc++.h>
+#include <stdlib.h>
+// #include <bits/stdc++.h>
+#include <algorithm>      //for std::shuffle
+#include <list>
 #include <ArduinoJson.h>
-#include <algorithm>
 #include <TFT_eSPI.h> // Hardware-specific library
 
 
@@ -42,63 +43,73 @@ public:
 };
 
 SPIClass SdSPI;
-std::vector<uint8_t> RaffleVector;
-std::vector<Participant *> WfofParticipants;
+StaticJsonDocument<8192> WfofJson;
+
+std::list<Participant *> WfofParticipants;
+std::list<Participant *>::iterator participantIterator;
 
 // #include <bitmapFunctions.h>
 
 /***********************************************************************************************************************************/
 void setup() {
+  //Set up serial port:
   Serial.begin(115200);
+
+  //Set up the display:
   tft.init();
-  tft.println("Booted...: ");
   h = tft.height();
   w = tft.width();
   tft.setRotation(3);
-  WiFi.begin();
-  WiFi.mode(WIFI_STA);
-  tft.println("Tap to generate a new sequence");
+
+  //Initialise the random number generator:
+  WiFi.mode(WIFI_STA);  //set up Wi-Fi to get true random generation
   randomSeed(esp_random());
   seed = esp_random();
+  Serial.println("Initialised with random seed:" + String(seed));
+  WiFi.mode(WIFI_OFF);
 
+  //Init the SD card:
   SdSPI.begin(18, 19, 23, 5);
-  SD.begin(5, SdSPI);
+  if (!SD.begin(5, SdSPI)) {
+    ESP_LOGE("SD", "Could not load SD card");
+  }
 
+  //Open the JSON file:
   File testTxt = SD.open("/wfof.json");
-
-  DynamicJsonDocument WfofJson(8192);
+  //Parse into a JSON object:
   uint8_t *TxtBuffer = new uint8_t[testTxt.size() + 1];
+  Serial.println("Text file size: " + String(testTxt.size()));
   testTxt.read(TxtBuffer, testTxt.size());
-  TxtBuffer[testTxt.size()] = 0;
+  TxtBuffer[testTxt.size()] = 0;  //Add a null terminator
+  deserializeJson(WfofJson, TxtBuffer);
   Serial.printf("\n%s\n", TxtBuffer);
 
-
-  deserializeJson(WfofJson, TxtBuffer);
-  delete TxtBuffer;
-
-
+  //Fetch the array from the JSON:
   JsonArray WfofArray = WfofJson["participants"].as<JsonArray>();
-  WfofParticipants.reserve(4096);
-  RaffleVector.reserve(4096);
+  Serial.println("Found " + String(WfofArray.size()) + " participants");
 
   int count = 0;
+  Serial.println("Full JSON");
+  serializeJsonPretty(WfofJson, Serial);
+  //Iterate through the JSON array and create participant objects:
   for (JsonVariant v : WfofArray) {
-    Participant *lParticipant = new Participant(v["name"].as<std::string>(), v["images"].as<int>());
-    WfofParticipants.push_back(lParticipant);
-    count++;
-  }
-  Serial.printf("Containing %i participants", WfofParticipants.size());
-  for (int i = 0; i < WfofParticipants.size(); i++) {
-    Serial.printf("\nFrom WFOF vector: \n %s has %i images \n", WfofParticipants[i]->name.c_str(), WfofParticipants[i]->imageCount);
-    for (uint8_t imageCounter = 0; imageCounter < WfofParticipants[i]->imageCount; imageCounter++) {
-      RaffleVector.push_back(i);
+    serializeJson(v, Serial);
+    Serial.println();
+    Participant *lParticipant = new Participant(v["name"].as<std::string>(), v["images"].as<uint8_t>());
+    // WfofParticipants.push_back(lParticipant);
+    //Add weighted participant counts:
+    for (uint8_t i = 0; i < lParticipant->imageCount; i++) {
+      WfofParticipants.push_back(lParticipant);
     }
+    Serial.printf("\nParticipant %s has %i images", v["name"].as<std::string>().c_str(), v["images"].as<uint8_t>());
+    //count++;
   }
 
-  Serial.print("Vector: ");
-  for (uint16_t i = 0; i < RaffleVector.size(); i++) {
-    Serial.printf("%i, ", RaffleVector[i]);
+  //Print the list:
+  for (participantIterator = WfofParticipants.begin(); participantIterator != WfofParticipants.end(); ++participantIterator) {
+    Serial.printf("\nParticipant from list: %s, %i", (*participantIterator)->name.c_str(), (*participantIterator)->imageCount);
   }
+
   tft.setCursor(20, 20);
   tft.setTextSize(2);
 
@@ -110,42 +121,26 @@ void loop() {
   uint16_t touchX, touchY;
   bool pressed = tft.getTouch(&touchX, &touchY);
   if (pressed) {
-    std::vector<uint8_t> ShuffleVector = RaffleVector;
+    tft.fillScreen(TFT_MAGENTA);
+    //Pick a winner:
+    participantIterator = WfofParticipants.begin();
+    long lWinnerIndex = random(WfofParticipants.size());
+    std::advance(participantIterator, lWinnerIndex);
+    Participant *lWinner = *participantIterator; //Iterator is moved to index of the winner, grab their name
 
-    std::shuffle(ShuffleVector.begin(), ShuffleVector.end(), std::default_random_engine(seed));
-    Serial.println("The Shuffled array is: ");
+    //Display the winner on the display:
+    tft.print(lWinner->name.c_str());
 
-    for (uint8_t i = 0; i < ShuffleVector.size(); i++) {
-      Serial.print(ShuffleVector[i]);
-      Serial.print(", ");
+    //Remove all instances of the winner from the list:
+    WfofParticipants.remove(lWinner);
+
+    Serial.println("\n\nRemoved " + String(lWinner->name.c_str()) + " Chosen index: " + String(lWinnerIndex));
+    //Reprint the list:
+    for (participantIterator = WfofParticipants.begin(); participantIterator != WfofParticipants.end(); ++participantIterator) {
+      Serial.printf("\nParticipant from list: %s, %i", (*participantIterator)->name.c_str(), (*participantIterator)->imageCount);
     }
-    delay(200);
-    //Pick a "winner":
-
-    uint16_t winnerIndex = random(ShuffleVector.size());
-    uint8_t winner = ShuffleVector[winnerIndex];
-    //Need to convert to c_str to then convert to an "Arduino string"...
-    Serial.println("The chosen index is: " + String(winnerIndex) + " which is the number " + String(winner) + " Which is tied to: " + String(WfofParticipants[winner]->name.c_str()));
-
-    //Again, the string conversion
-    tft.println("The winner is " + String(WfofParticipants[winner]->name.c_str()));
     delay(2000);
     tft.setCursor(20, 20);
-    tft.fillScreen(TFT_MAGENTA);
-
-    //remove all instances of "winner" from the vector:
-    Serial.println("Removing " + String(winner));
-    std::remove(RaffleVector.begin(), RaffleVector.end(), winner);
-    //Reduce vector size since this doesn't seem to happen automatically...
-    for (uint16_t i = 0; i < WfofParticipants[winner]->imageCount; i++) {
-      RaffleVector.pop_back();
-    }
-
-    //Re-print the vector for debugging:
-    for (uint16_t i = 0; i < RaffleVector.size(); i++) {
-      Serial.print(RaffleVector[i]);
-      Serial.print(", ");
-    }
   }
 }
 
