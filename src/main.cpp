@@ -62,6 +62,8 @@ void setup() {
   w = tft.width();
   tft.setRotation(3);
 
+  tft.print("Hello");
+
   //Initialise the random number generator:
   WiFi.mode(WIFI_STA);  //set up Wi-Fi to get true random generation
   randomSeed(esp_random());
@@ -118,9 +120,9 @@ void setup() {
 
 /***********************************************************************************************************************************/
 void loop() {
-  // uint16_t touchX, touchY;
-  // bool pressed = tft.getTouch(&touchX, &touchY);
-  bool pressed = !digitalRead(4); //Inverted because of pull-up resistor
+  uint16_t touchX, touchY;
+  bool pressed = tft.getTouch(&touchX, &touchY);
+  // bool pressed = !digitalRead(4); //Inverted because of pull-up resistor
   if (pressed) {
 
 
