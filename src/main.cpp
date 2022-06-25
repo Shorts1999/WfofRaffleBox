@@ -11,14 +11,8 @@
 #include <ArduinoJson.h>
 #include <TFT_eSPI.h> // Hardware-specific library
 
-
-
 #define BLACK 0x0000
 #define WHITE 0xFFFF
-
-
-// #include "Participant.h"
-
 
 TFT_eSPI tft = TFT_eSPI();       // Invoke custom library
 
@@ -47,8 +41,6 @@ StaticJsonDocument<8192> WfofJson;
 
 std::list<Participant *> WfofParticipants;
 std::list<Participant *>::iterator participantIterator;
-
-// #include <bitmapFunctions.h>
 
 /***********************************************************************************************************************************/
 void setup() {
